@@ -51,14 +51,19 @@ class Environment:
             self.preferences = dict()
             self.preferences['alpha'] = np.random.normal(*config[ptype]['alpha'])
             self.preferences['age'] = np.random.normal(*config[ptype]['age'])
-            self.preferences['drive'] = np.clip(np.random.normal(config[ptype]['drive'][0], config[ptype]['drive'][1],[config['cycle_size'],config['num_keys']]),0,1) 
-            
+            self.preferences['drive'] = np.random.beta(config[ptype]['drive'][0], config[ptype]['drive'][1], config['num_keys'])
+            self.preferences['drive'] *= np.clip(0.5+0.5*np.sin(np.pi*np.arange(config['num_keys'])/10)+np.random.randn(config['num_keys'])*0.5,0,1)
+            self.preferences['drive'] *=0.2
             if ptype == 'person':
-                r = np.random.rand(config['cycle_size'], config['num_keys'])
-                self.preferences['carpool'] = np.clip((r-0.5+np.random.rand(config['num_keys'])),0,1)
+                r = np.random.beta(0.01,1, config['num_keys'])
+                r = r / np.max(r)
+                r2 = 1- np.random.randn(config['cycle_size'], config['num_keys'])*0.1
+                self.preferences['carpool'] = np.clip(np.round(1 - (1-r)*r2,2),0,1)
             elif ptype == 'friend':
-                r = np.random.rand([config['cycle_size'], config['num_keys']])
-                self.preferences['carpool'] = np.clip((r-0.8+np.random.rand(config['num_keys'])),0,1)
+                r = np.random.beta(0.01,10,config['num_keys'])
+                r = r / np.max(r)
+                r2 = np.random.rand(config['cycle_size'], config['num_keys'])
+                self.preferences['carpool'] = np.clip(np.round(1 - (1-r)*r2,2),0,1)
             elif ptype == 'malicious':
                 self.preferences['carpool'] = np.zeros([config['cycle_size'],config['num_keys']])
         
@@ -87,6 +92,7 @@ class Environment:
         #other parameters
         self.line = []
         self.P_sense = config['P(sense)']
+        self.k = config['k']
         self.config = config
         self.cycle_size = config['cycle_size']
     
@@ -101,19 +107,25 @@ class Environment:
         #look at cars going through
         output['cars_seen'] = []
         output['keys_exist'] = []
-        output['keys_sensed'] = 0
+        output['keys_sensed'] = []
+        output['cars_with_keys'] = []
+        output['cars_without_keys'] = []
         for i in range(self.k):
             if self.line:
                 car = self.line.pop(0)
                 output['cars_seen'].append(id(car))
                 keys = pick(car.P_contains_key[t])
-                output['keys_exist'].append(bool(len(keys)))
-                output['keys_sensed'] += len(keys)
+                if len(keys):
+                    output['cars_with_keys'].append(id(car))
+                else:
+                    output['cars_without_keys'].append(id(car))
+                output['keys_exist'].extend(keys) 
+                output['keys_sensed'].extend(keys[pick([self.P_sense]*len(keys))])
         
         
         #update cars
         for car in self.cars:
-            if pick(car['P(dies|age)']):
+            if pick(car.P_dies()):
                 self.cars.remove(car)
                 #high chance of buying new car if old one dies
                 self.cars.append(self.Car(car.owner))
